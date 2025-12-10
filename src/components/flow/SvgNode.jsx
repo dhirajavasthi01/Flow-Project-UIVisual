@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import "react-tooltip/dist/react-tooltip.css";
 import variables from '../../assets/Variables';
 import { NodeTooltip, NodeTooltipContent, useNodeTooltip } from './nodeTooltip/nodeTooltip';
 
 
 // Inner component that uses the tooltip hook directly - no wrapper affecting layout
-const SvgContent = ({ svgContent, svgPath, isHighlighted, svgContainerRef, HandlesComponent, id, shouldApplyBlink }) => {
+// Memoized to prevent React from treating it as a new component on every render
+const SvgContent = memo(({ svgContent, svgPath, isHighlighted, svgContainerRef, HandlesComponent, id, shouldApplyBlink }) => {
   const tooltip = useNodeTooltip();
   
   const handleMouseEnter = useCallback(() => {
@@ -46,7 +47,9 @@ const SvgContent = ({ svgContent, svgPath, isHighlighted, svgContainerRef, Handl
       {HandlesComponent && <HandlesComponent id={id} containerRef={svgContainerRef} />}
     </div>
   );
-};
+});
+
+SvgContent.displayName = 'SvgContent';
 
 const SvgNode = ({
   id,
