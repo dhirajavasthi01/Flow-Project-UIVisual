@@ -82,6 +82,126 @@ const SvgNode = ({
   const [useDefaultSvgColors, setUseDefaultSvgColors] = useState(true);
   const svgContainerRef = useRef(null);
 
+  // Helper function to setup SVG viewBox
+  const setupSvgViewBox = (svgElement) => {
+    const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    tempSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    tempSvg.style.position = "absolute";
+    tempSvg.style.visibility = "hidden";
+    tempSvg.style.width = "0";
+    tempSvg.style.height = "0";
+
+    document.body.appendChild(tempSvg);
+    Array.from(svgElement.childNodes).forEach(node => tempSvg.appendChild(node.cloneNode(true)));
+
+    const bbox = tempSvg.getBBox();
+    document.body.removeChild(tempSvg);
+
+    svgElement.setAttribute("viewBox", `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
+    svgElement.setAttribute("width", "100%");
+    svgElement.setAttribute("height", "100%");
+    svgElement.setAttribute("preserveAspectRatio", "none");
+  };
+
+  // Helper function to apply highlight class
+  const applyHighlightClass = (svgElement, isHighlighted) => {
+    if (!isHighlighted) return;
+    const existingClass = svgElement.getAttribute("class") || "";
+    svgElement.setAttribute("class", `${existingClass} ${"highlighted"}`.trim());
+  };
+
+  // Helper function to apply selected stroke styles (before gradient/solid color processing)
+  const applyInitialSelectedStrokeStyles = (svgElement, isSelected, isDeveloperMode) => {
+    if (!isSelected || isDeveloperMode) return;
+    svgElement.querySelectorAll("[stroke]").forEach(el => {
+      if (el.getAttribute("stroke") !== "none") {
+        el.setAttribute("stroke-width", "1px");
+        el.setAttribute("stroke", "#0066ff");
+        el.style.filter = "drop-shadow(0 0 1px rgba(0, 102, 255, 0.8))";
+      }
+    });
+  };
+
+  // Helper function to create gradient definition
+  const createGradientDefinition = (doc, gradientId, gradientStart, gradientEnd) => {
+    const defs = doc.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const linearGrad = doc.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+
+    linearGrad.setAttribute("id", gradientId);
+    linearGrad.setAttribute("x1", "0%");
+    linearGrad.setAttribute("y1", "0%");
+    linearGrad.setAttribute("x2", "0%");
+    linearGrad.setAttribute("y2", "100%");
+
+    const createStop = (offset, color) => {
+      const stop = doc.createElementNS("http://www.w3.org/2000/svg", "stop");
+      stop.setAttribute("offset", offset);
+      stop.setAttribute("stop-color", color);
+      return stop;
+    };
+
+    linearGrad.appendChild(createStop("0%", gradientStart));
+    linearGrad.appendChild(createStop("50%", gradientEnd));
+    linearGrad.appendChild(createStop("100%", gradientStart));
+
+    defs.appendChild(linearGrad);
+    return defs;
+  };
+
+  // Helper function to apply gradient fill
+  const applyGradientFill = (svgElement, gradientId) => {
+    svgElement.querySelectorAll("[fill]").forEach(el => {
+      if (el.getAttribute("fill") !== "none") {
+        el.setAttribute("fill", `url(#${gradientId})`);
+      }
+    });
+  };
+
+  // Helper function to apply stroke styles with selected state handling
+  const applyStrokeStyles = (svgElement, strokeColor, isSelected, isDeveloperMode, selectedStrokeColor, selectedFilter) => {
+    svgElement.querySelectorAll("[stroke]").forEach(el => {
+      if (el.getAttribute("stroke") === "none") return;
+      
+      el.setAttribute("stroke", strokeColor);
+      
+      if (isSelected && !isDeveloperMode) {
+        el.setAttribute("stroke-width", "1px");
+        el.setAttribute("stroke", selectedStrokeColor);
+        el.style.filter = selectedFilter;
+      }
+    });
+  };
+
+  // Helper function to apply fill color
+  const applyFillColor = (svgElement, fillColor) => {
+    if (!fillColor) return;
+    svgElement.querySelectorAll("[fill]").forEach(el => {
+      if (el.getAttribute("fill") !== "none") {
+        el.setAttribute("fill", fillColor);
+      }
+    });
+  };
+
+  // Helper function to process gradient mode
+  const processGradientMode = (svgElement, doc, gradientStart, gradientEnd, nodeId, nodeType, strokeColor, isSelected, isDeveloperMode) => {
+    const gradientId = `customGradient-${nodeId}`;
+    svgElement.setAttribute("id", `svg-node-${nodeType}`);
+
+    const defs = createGradientDefinition(doc, gradientId, gradientStart, gradientEnd);
+    svgElement.insertBefore(defs, svgElement.firstChild);
+
+    applyGradientFill(svgElement, gradientId);
+    applyStrokeStyles(svgElement, strokeColor, isSelected, isDeveloperMode, "#000000ff", "drop-shadow(0 0 1px rgba(211, 214, 218, 0.8))");
+  };
+
+  // Helper function to process solid color mode
+  const processSolidColorMode = (svgElement, fillColor, strokeColor, isSelected, isDeveloperMode) => {
+    if (!fillColor) return;
+    
+    applyFillColor(svgElement, fillColor);
+    applyStrokeStyles(svgElement, strokeColor, isSelected, isDeveloperMode, variables.primary_gray_2, "drop-shadow(0 0 1px rgba(216, 219, 222, 0.8))");
+  };
+
   const processSvg = ({
     svgText,
     fillColor,
@@ -100,102 +220,14 @@ const SvgNode = ({
       const doc = parser.parseFromString(svgText, 'image/svg+xml');
       const svgElement = doc.documentElement;
 
-      const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      tempSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      tempSvg.style.position = "absolute";
-      tempSvg.style.visibility = "hidden";
-      tempSvg.style.width = "0";
-      tempSvg.style.height = "0";
-
-      document.body.appendChild(tempSvg);
-      Array.from(svgElement.childNodes).forEach(node => tempSvg.appendChild(node.cloneNode(true)));
-
-      const bbox = tempSvg.getBBox();
-      document.body.removeChild(tempSvg);
-
-      svgElement.setAttribute("viewBox", `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
-      svgElement.setAttribute("width", "100%");
-      svgElement.setAttribute("height", "100%");
-      svgElement.setAttribute("preserveAspectRatio", "none");
-
-      if (isHighlighted) {
-        const existingClass = svgElement.getAttribute("class") || "";
-        svgElement.setAttribute("class", `${existingClass} ${"highlighted"}`.trim());
-      }
-
-      if (isSelected && !isDeveloperMode) {
-        svgElement.querySelectorAll("[stroke]").forEach(el => {
-          if (el.getAttribute("stroke") !== "none") {
-            el.setAttribute("stroke-width", "1px");
-            el.setAttribute("stroke", "#0066ff");
-            el.style.filter = "drop-shadow(0 0 1px rgba(0, 102, 255, 0.8))";
-          }
-        });
-      }
+      setupSvgViewBox(svgElement);
+      applyHighlightClass(svgElement, isHighlighted);
+      applyInitialSelectedStrokeStyles(svgElement, isSelected, isDeveloperMode);
 
       if (gradientStart && gradientEnd) {
-        const gradientId = `customGradient-${nodeId}`;
-        svgElement.setAttribute("id", `svg-node-${nodeType}`);
-
-        const defs = doc.createElementNS("http://www.w3.org/2000/svg", "defs");
-        const linearGrad = doc.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
-
-        linearGrad.setAttribute("id", gradientId);
-        linearGrad.setAttribute("x1", "0%");
-        linearGrad.setAttribute("y1", "0%");
-        linearGrad.setAttribute("x2", "0%");
-        linearGrad.setAttribute("y2", "100%");
-
-        const stop1 = doc.createElementNS("http://www.w3.org/2000/svg", "stop");
-        stop1.setAttribute("offset", "0%");
-        stop1.setAttribute("stop-color", gradientStart);
-        linearGrad.appendChild(stop1);
-
-        const stop2 = doc.createElementNS("http://www.w3.org/2000/svg", "stop");
-        stop2.setAttribute("offset", "50%");
-        stop2.setAttribute("stop-color", gradientEnd);
-        linearGrad.appendChild(stop2);
-
-        const stop3 = doc.createElementNS("http://www.w3.org/2000/svg", "stop");
-        stop3.setAttribute("offset", "100%");
-        stop3.setAttribute("stop-color", gradientStart);
-        linearGrad.appendChild(stop3);
-
-        defs.appendChild(linearGrad);
-        svgElement.insertBefore(defs, svgElement.firstChild);
-
-        svgElement.querySelectorAll("[fill]").forEach(el => {
-          if (el.getAttribute("fill") !== "none")
-            el.setAttribute("fill", `url(#${gradientId})`);
-        });
-
-        svgElement.querySelectorAll("[stroke]").forEach(el => {
-          if (el.getAttribute("stroke") !== "none") {
-            el.setAttribute("stroke", strokeColor);
-            if (isSelected && !isDeveloperMode) {
-              el.setAttribute("stroke-width", "1px");
-              el.setAttribute("stroke", "#000000ff");
-              el.style.filter = "drop-shadow(0 0 1px rgba(211, 214, 218, 0.8))";
-            }
-          }
-        });
+        processGradientMode(svgElement, doc, gradientStart, gradientEnd, nodeId, nodeType, strokeColor, isSelected, isDeveloperMode);
       } else {
-        if (fillColor) {
-          svgElement.querySelectorAll("[fill]").forEach(el => {
-            if (el.getAttribute("fill") !== "none") el.setAttribute("fill", fillColor);
-          });
-
-          svgElement.querySelectorAll("[stroke]").forEach(el => {
-            if (el.getAttribute("stroke") !== "none") {
-              el.setAttribute("stroke", strokeColor);
-              if (isSelected && !isDeveloperMode) {
-                el.setAttribute("stroke-width", "1px");
-                el.setAttribute("stroke", variables.primary_gray_2);
-                el.style.filter = "drop-shadow(0 0 1px rgba(216, 219, 222, 0.8))";
-              }
-            }
-          });
-        }
+        processSolidColorMode(svgElement, fillColor, strokeColor, isSelected, isDeveloperMode);
       }
 
       return svgElement.outerHTML;
