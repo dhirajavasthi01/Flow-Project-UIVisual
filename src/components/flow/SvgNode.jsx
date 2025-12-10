@@ -183,7 +183,17 @@ const SvgNode = ({
   };
 
   // Helper function to process gradient mode
-  const processGradientMode = (svgElement, doc, gradientStart, gradientEnd, nodeId, nodeType, strokeColor, isSelected, isDeveloperMode) => {
+  const processGradientMode = ({
+    svgElement,
+    doc,
+    gradientStart,
+    gradientEnd,
+    nodeId,
+    nodeType,
+    strokeColor,
+    isSelected,
+    isDeveloperMode
+  }) => {
     const gradientId = `customGradient-${nodeId}`;
     svgElement.setAttribute("id", `svg-node-${nodeType}`);
 
@@ -195,7 +205,13 @@ const SvgNode = ({
   };
 
   // Helper function to process solid color mode
-  const processSolidColorMode = (svgElement, fillColor, strokeColor, isSelected, isDeveloperMode) => {
+  const processSolidColorMode = ({
+    svgElement,
+    fillColor,
+    strokeColor,
+    isSelected,
+    isDeveloperMode
+  }) => {
     if (!fillColor) return;
     
     applyFillColor(svgElement, fillColor);
@@ -225,9 +241,25 @@ const SvgNode = ({
       applyInitialSelectedStrokeStyles(svgElement, isSelected, isDeveloperMode);
 
       if (gradientStart && gradientEnd) {
-        processGradientMode(svgElement, doc, gradientStart, gradientEnd, nodeId, nodeType, strokeColor, isSelected, isDeveloperMode);
+        processGradientMode({
+          svgElement,
+          doc,
+          gradientStart,
+          gradientEnd,
+          nodeId,
+          nodeType,
+          strokeColor,
+          isSelected,
+          isDeveloperMode
+        });
       } else {
-        processSolidColorMode(svgElement, fillColor, strokeColor, isSelected, isDeveloperMode);
+        processSolidColorMode({
+          svgElement,
+          fillColor,
+          strokeColor,
+          isSelected,
+          isDeveloperMode
+        });
       }
 
       return svgElement.outerHTML;
