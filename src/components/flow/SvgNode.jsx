@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import "react-tooltip/dist/react-tooltip.css";
 import variables from '../../assets/Variables';
 import { NodeTooltip, NodeTooltipContent, useNodeTooltip } from './nodeTooltip/nodeTooltip';
@@ -78,7 +78,7 @@ const SvgNode = ({
 
   const failureModeList = failureModeNames?.length ? failureModeNames : null;
 
-  const [svgContent, setSvgContent] = useState(null);
+  const [rawSvgText, setRawSvgText] = useState(null);
   const [useDefaultSvgColors, setUseDefaultSvgColors] = useState(true);
   const svgContainerRef = useRef(null);
 
@@ -269,32 +269,39 @@ const SvgNode = ({
     }
   };
 
+  // Fetch raw SVG only when svgPath changes
   useEffect(() => {
     const fetchSvg = async () => {
       try {
         const response = await fetch(svgPath);
-        let svgText = await response.text();
-        svgText = processSvg({
-          svgText,
-          fillColor: nodeColor,
-          strokeColor,
-          isHighlighted,
-          useDefaultColors: useDefaultSvgColors,
-          gradientStart,
-          gradientEnd,
-          nodeId: id,
-          nodeType,
-          isSelected,
-          isDeveloperMode
-        });
-        setSvgContent(svgText);
+        const svgText = await response.text();
+        setRawSvgText(svgText);
       } catch (error) {
         console.error("Error loading SVG:", error);
-        setSvgContent(null);
+        setRawSvgText(null);
       }
     };
     fetchSvg();
-  }, [svgPath, isHighlighted, nodeColor, strokeColor, useDefaultSvgColors, gradientStart, gradientEnd, id, nodeType, isSelected, isDeveloperMode]);
+  }, [svgPath]);
+
+  // Process SVG using useMemo - only recalculates when styling properties change
+  const svgContent = useMemo(() => {
+    if (!rawSvgText) return null;
+    
+    return processSvg({
+      svgText: rawSvgText,
+      fillColor: nodeColor,
+      strokeColor,
+      isHighlighted,
+      useDefaultColors: useDefaultSvgColors,
+      gradientStart,
+      gradientEnd,
+      nodeId: id,
+      nodeType,
+      isSelected,
+      isDeveloperMode
+    });
+  }, [rawSvgText, isHighlighted, nodeColor, strokeColor, useDefaultSvgColors, gradientStart, gradientEnd, id, nodeType, isSelected, isDeveloperMode]);
 
   useEffect(() => {
     if (
@@ -341,7 +348,7 @@ const SvgNode = ({
   // Only render tooltip wrapper in non-developer mode
   if (!isDeveloperMode) {
     return (
-      <NodeTooltip>
+      <NodeTooltip nodeId={id}>
         <NodeTooltipContent>
           <div>Bearing node</div>
         </NodeTooltipContent>
