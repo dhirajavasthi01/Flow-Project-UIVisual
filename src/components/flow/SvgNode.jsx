@@ -1,61 +1,103 @@
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  memo,
+  useMemo,
+} from "react";
+
 import "react-tooltip/dist/react-tooltip.css";
-import variables from '../../assets/Variables';
-import { NodeTooltip, NodeTooltipContent, useNodeTooltip } from './nodeTooltip/nodeTooltip';
 
-const SvgContent = memo(({ svgContent, svgPath, isHighlighted, svgContainerRef, HandlesComponent, id, shouldApplyBlink }) => {
-  const tooltip = useNodeTooltip();
-  const handleMouseEnter = useCallback(() => tooltip?.showTooltip(), [tooltip]);
-  const handleMouseLeave = useCallback(() => tooltip?.hideTooltip(), [tooltip]);
+import { variables } from "../../assets/Variables";
+import {
+  NodeTooltip,
+  NodeTooltipContent,
+  useNodeTooltip,
+} from "./nodeTooltip/NodeTooltip";
 
-  return (
-    <div
-      ref={svgContainerRef}
-      data-tooltip-id={`tooltip-${id}`}
-      className={shouldApplyBlink ? 'node-blink' : ''}
-      style={{ 
-        position: "relative", 
-        width: "100%", 
-        height: "100%", // Fill the flex-grow container
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center"
-      }}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      {svgContent ? (
-        <div
-          dangerouslySetInnerHTML={{ __html: svgContent }}
-          style={{ 
-            width: "100%", 
-            height: "100%", 
-            pointerEvents: "none", 
-            display: "flex",
-            // This ensures the SVG stretches to the very edges of the div
-            alignItems: "stretch", 
-            justifyContent: "stretch" 
-          }}
-        />
-      ) : (
-        <img
-          src={svgPath}
-          alt="Node"
-          style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }}
-          className={isHighlighted ? "highlighted" : ""}
-        />
-      )}
-      {HandlesComponent && <HandlesComponent id={id} containerRef={svgContainerRef} />}
-    </div>
-  );
-});
+import { Tooltip } from "react-tooltip";
+import { isSpecialNodeFromSvgText } from "./utils/nodeSpecialHandling";
 
-SvgContent.displayName = 'SvgContent';
+/* ----------------------------- SvgContent ----------------------------- */
+
+const SvgContent = memo(
+  ({
+    svgContent,
+    svgPath,
+    isHighlighted,
+    svgContainerRef,
+    HandlesComponent,
+    id,
+    shouldApplyBlink,
+  }) => {
+    const tooltip = useNodeTooltip();
+
+    const handleMouseEnter = useCallback(() => {
+      tooltip?.showTooltip();
+    }, [tooltip]);
+
+    const handleMouseLeave = useCallback(() => {
+      tooltip?.hideTooltip();
+    }, [tooltip]);
+
+    return (
+      <div
+        ref={svgContainerRef}
+        data-tooltip-id={`tooltip-${id}`}
+        className={shouldApplyBlink ? "node-blink" : ""}
+        style={{
+          position: "relative",
+          width: "100%",
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {svgContent ? (
+          <div
+            dangerouslySetInnerHTML={{ __html: svgContent }}
+            style={{
+              width: "100%",
+              flex: 1,
+              minHeight: 0,
+              pointerEvents: "none",
+            }}
+          />
+        ) : (
+          <img
+            src={svgPath}
+            alt="Node"
+            className={isHighlighted ? "highlighted" : ""}
+            style={{
+              width: "100%",
+              flex: 1,
+              minHeight: 0,
+              objectFit: "contain",
+            }}
+          />
+        )}
+
+        {HandlesComponent && (
+          <HandlesComponent id={id} containerRef={svgContainerRef} />
+        )}
+      </div>
+    );
+  }
+);
+
+SvgContent.displayName = "SvgContent";
+
+/* ------------------------------ SvgNode ------------------------------ */
 
 const SvgNode = ({
   id,
   data,
   nodeType,
+  defaultNodeColor = "#d3d3d3",
   defaultStrokeColor = "#000000",
   HandlesComponent,
   isHighlighted = false,
@@ -63,135 +105,408 @@ const SvgNode = ({
   isDeveloperMode = true,
   svgPath,
 }) => {
-  const { nodeColor, strokeColor = defaultStrokeColor, tag, subTag, gradientStart, gradientEnd, shouldBlink = false } = data;
-  const [svgContent, setSvgContent] = useState(null);
+  const {
+    nodeColor = defaultNodeColor,
+    strokeColor = defaultStrokeColor,
+    gradientStart,
+    gradientEnd,
+    tooltipContent,
+    failureModeNames,
+    ttfDays = null,
+    shouldBlink = false,
+  } = data;
+
+  const failureModeList = failureModeNames?.length
+    ? failureModeNames
+    : null;
+
+  const [rawSvgText, setRawSvgText] = useState(null);
+  const [useDefaultSvgColors, setUseDefaultSvgColors] = useState(true);
+
   const svgContainerRef = useRef(null);
 
-  // CRITICAL: This crops the SVG to its actual path boundaries
-  const setupSvgViewBox = (svgElement) => {
-    // 1. Temporary attach to DOM to get real measurements
-    const svgClone = svgElement.cloneNode(true);
-    svgClone.style.position = 'absolute';
-    svgClone.style.visibility = 'hidden';
-    document.body.appendChild(svgClone);
-    
-    try {
-      const bbox = svgClone.getBBox();
-      // 2. Set viewBox to exactly match the path dimensions (no padding)
-      svgElement.setAttribute("viewBox", `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
-    } catch (e) {
-      // Fallback if BBox fails
-      if (!svgElement.getAttribute("viewBox")) {
-        const w = svgElement.getAttribute("width") || 100;
-        const h = svgElement.getAttribute("height") || 100;
-        svgElement.setAttribute("viewBox", `0 0 ${parseFloat(w)} ${parseFloat(h)}`);
-      }
-    }
-    document.body.removeChild(svgClone);
+  const showTooltipContent = (content) =>
+    content ? (
+      <div className="p-[0_1vmin] text-center">
+        <span className="text-14">{content}</span>
+      </div>
+    ) : null;
 
-    svgElement.removeAttribute("width");
-    svgElement.removeAttribute("height");
-    svgElement.style.width = "100%";
-    svgElement.style.height = "100%";
-    // 'none' forces the SVG to fill the container regardless of aspect ratio
-    // If you want to keep shape, use 'xMidYMid meet'
-    svgElement.setAttribute("preserveAspectRatio", "none"); 
+  /* ------------------------- SVG Helpers ------------------------- */
+
+  const setupSvgViewBox = (svgElement) => {
+    const tempSvg = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "svg"
+    );
+
+    tempSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    Object.assign(tempSvg.style, {
+      position: "absolute",
+      visibility: "hidden",
+      width: "0",
+      height: "0",
+    });
+
+    document.body.appendChild(tempSvg);
+
+    Array.from(svgElement.childNodes).forEach((node) =>
+      tempSvg.appendChild(node.cloneNode(true))
+    );
+
+    const bbox = tempSvg.getBBox();
+    document.body.removeChild(tempSvg);
+
+    const padding = 0.2;
+    svgElement.setAttribute(
+      "viewBox",
+      `${bbox.x - padding} ${bbox.y - padding} ${
+        bbox.width + 2 * padding
+      } ${bbox.height + 2 * padding}`
+    );
+    svgElement.setAttribute("width", "100%");
+    svgElement.setAttribute("height", "100%");
+    svgElement.setAttribute("preserveAspectRatio", "none");
   };
 
-  const processSvg = ({ svgText, nodeType, gradientStart, gradientEnd, nodeId, isHighlighted, isSelected, isDeveloperMode }) => {
+  const applyHighlightClass = (svgElement, highlighted) => {
+    if (!highlighted) return;
+    const existing = svgElement.getAttribute("class") || "";
+    svgElement.setAttribute(
+      "class",
+      `${existing} highlighted`.trim()
+    );
+  };
+
+  const applyInitialSelectedStrokeStyles = (
+    svgElement,
+    selected,
+    developerMode
+  ) => {
+    if (!selected || developerMode) return;
+
+    svgElement.querySelectorAll("[stroke]").forEach((el) => {
+      if (el.getAttribute("stroke") !== "none") {
+        el.setAttribute("stroke-width", "1px");
+        el.setAttribute("stroke", "#0066ff");
+        el.style.filter =
+          "drop-shadow(0 0 1px rgba(0, 102, 255, 0.8))";
+      }
+    });
+  };
+
+  const createGradientDefinition = (
+    doc,
+    gradientId,
+    start,
+    end
+  ) => {
+    const defs = doc.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "defs"
+    );
+    const linearGrad = doc.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "linearGradient"
+    );
+
+    linearGrad.setAttribute("id", gradientId);
+    linearGrad.setAttribute("x1", "0%");
+    linearGrad.setAttribute("y1", "0%");
+    linearGrad.setAttribute("x2", "0%");
+    linearGrad.setAttribute("y2", "100%");
+
+    const createStop = (offset, color) => {
+      const stop = doc.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "stop"
+      );
+      stop.setAttribute("offset", offset);
+      stop.setAttribute("stop-color", color);
+      return stop;
+    };
+
+    linearGrad.append(
+      createStop("0%", start),
+      createStop("50%", end),
+      createStop("100%", start)
+    );
+
+    defs.appendChild(linearGrad);
+    return defs;
+  };
+
+  const applyGradientFill = (svgElement, gradientId) => {
+    svgElement.querySelectorAll("[fill]").forEach((el) => {
+      if (el.getAttribute("fill") !== "none") {
+        el.setAttribute("fill", `url(#${gradientId})`);
+      }
+    });
+  };
+
+  const applyStrokeStyles = (
+    svgElement,
+    color,
+    selected,
+    developerMode,
+    selectedColor,
+    filter
+  ) => {
+    svgElement.querySelectorAll("[stroke]").forEach((el) => {
+      if (el.getAttribute("stroke") === "none") return;
+
+      el.setAttribute("stroke", color);
+      el.setAttribute("stroke-width", "2");
+      el.setAttribute("vector-effect", "non-scaling-stroke");
+
+      if (selected && !developerMode) {
+        el.setAttribute("stroke-width", "1px");
+        el.setAttribute("stroke", selectedColor);
+        el.style.filter = filter;
+      }
+    });
+  };
+
+  const applyFillColor = (svgElement, fillColor) => {
+    if (!fillColor) return;
+
+    svgElement.querySelectorAll("[fill]").forEach((el) => {
+      if (el.getAttribute("fill") !== "none") {
+        el.setAttribute("fill", fillColor);
+      }
+    });
+  };
+
+  /* ------------------------- SVG Processing ------------------------- */
+
+  const processSvg = ({
+    svgText,
+    fillColor,
+    strokeColor,
+    isHighlighted,
+    gradientStart,
+    gradientEnd,
+    nodeId,
+    nodeType,
+    isSelected,
+    isDeveloperMode,
+  }) => {
     try {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(svgText, 'image/svg+xml');
+      const doc = parser.parseFromString(
+        svgText,
+        "image/svg+xml"
+      );
       const svgElement = doc.documentElement;
-      setupSvgViewBox(svgElement);
 
-      const name = nodeType?.toLowerCase() || "";
-      const isSpecialNode = name.includes('gear') || name.includes('tank');
-      const ns = "http://www.w3.org/2000/svg";
+      setupSvgViewBox(svgElement);
+      applyHighlightClass(svgElement, isHighlighted);
+      applyInitialSelectedStrokeStyles(
+        svgElement,
+        isSelected,
+        isDeveloperMode
+      );
+
+      // Analyze the SVG text directly to determine if it should preserve original colors
+      const isSpecial = isSpecialNodeFromSvgText(svgText);
 
       if (gradientStart && gradientEnd) {
-        const gradientId = `grad-${nodeId}`;
-        const defs = doc.createElementNS(ns, "defs");
-        const linearGrad = doc.createElementNS(ns, "linearGradient");
-        linearGrad.setAttribute("id", gradientId);
-        linearGrad.setAttribute("x1", "0%"); linearGrad.setAttribute("y1", "0%");
-        linearGrad.setAttribute("x2", "0%"); linearGrad.setAttribute("y2", "100%");
-        [{o: "0%", c: gradientStart}, {o: "50%", c: gradientEnd}, {o: "100%", c: gradientStart}].forEach(s => {
-          const stop = doc.createElementNS(ns, "stop");
-          stop.setAttribute("offset", s.o);
-          stop.setAttribute("stop-color", s.c);
-          linearGrad.appendChild(stop);
-        });
-        defs.appendChild(linearGrad);
+        // Gradients are always applied regardless of isSpecial status
+        const gradientId = `customGradient-${nodeId}`;
+        svgElement.setAttribute("id", `svg-node-${nodeType}`);
+
+        const defs = createGradientDefinition(
+          doc,
+          gradientId,
+          gradientStart,
+          gradientEnd
+        );
+
         svgElement.insertBefore(defs, svgElement.firstChild);
-        svgElement.querySelectorAll("[fill]").forEach(el => {
-          if (el.getAttribute("fill") !== "none") el.setAttribute("fill", `url(#${gradientId})`);
-        });
-      } else if (nodeColor && !isSpecialNode) {
-        svgElement.querySelectorAll("[fill]").forEach(el => {
-          if (el.getAttribute("fill") !== "none") el.setAttribute("fill", nodeColor);
-        });
+        applyGradientFill(svgElement, gradientId);
+      } else if (fillColor && !isSpecial) {
+        // Only apply fill color if nodeColor exists and node is not special
+        applyFillColor(svgElement, fillColor);
       }
 
-      svgElement.querySelectorAll("[stroke]").forEach(el => {
-        if (el.getAttribute("stroke") === "none") return;
-        if (!isSpecialNode || strokeColor) el.setAttribute("stroke", strokeColor || "#000000");
-      });
+      // Apply stroke styles - matches old logic: if !isSpecial || strokeColor
+      // Use the helper function for consistency with the rest of the code
+      if (!isSpecial || strokeColor) {
+        applyStrokeStyles(
+          svgElement,
+          strokeColor || "#000000",
+          isSelected,
+          isDeveloperMode,
+          variables.primary_gray_2,
+          "drop-shadow(0 0 1px rgba(216, 219, 222, 0.8))"
+        );
+      }
 
-      return new XMLSerializer().serializeToString(doc);
-    } catch (err) { return svgText; }
+      return svgElement.outerHTML;
+    } catch (error) {
+      console.error("Error processing SVG:", error);
+      return svgText;
+    }
   };
 
+  /* --------------------------- Effects --------------------------- */
+
   useEffect(() => {
-    let isMounted = true;
-    fetch(svgPath).then(res => res.text()).then(svgTextRaw => {
-      if (!isMounted) return;
-      setSvgContent(processSvg({ svgText: svgTextRaw, nodeType, gradientStart, gradientEnd, nodeId: id, isHighlighted, isSelected, isDeveloperMode }));
+    const fetchSvg = async () => {
+      try {
+        const response = await fetch(svgPath);
+        setRawSvgText(await response.text());
+      } catch (error) {
+        console.error("Error loading SVG:", error);
+        setRawSvgText(null);
+      }
+    };
+
+    fetchSvg();
+  }, [svgPath]);
+
+  const svgContent = useMemo(() => {
+    if (!rawSvgText) return null;
+
+    return processSvg({
+      svgText: rawSvgText,
+      fillColor: nodeColor,
+      strokeColor,
+      isHighlighted,
+      gradientStart,
+      gradientEnd,
+      nodeId: id,
+      nodeType,
+      isSelected,
+      isDeveloperMode,
     });
-    return () => { isMounted = false; };
-  }, [svgPath, isHighlighted, nodeColor, strokeColor, gradientStart, gradientEnd, id, isSelected, isDeveloperMode]);
+  }, [
+    rawSvgText,
+    nodeColor,
+    strokeColor,
+    isHighlighted,
+    gradientStart,
+    gradientEnd,
+    id,
+    nodeType,
+    isSelected,
+    isDeveloperMode,
+  ]);
 
-  return (
-    <div style={{ 
-      width: "100%", 
-      height: "100%", 
-      display: "flex", 
-      flexDirection: "column"
-    }}>
-      {tag && (
-        <div style={{ flexShrink: 0, fontSize: "14px", textAlign: "center", width: "100%" }}>
-          {tag}
-        </div>
-      )}
-      
-      {/* This wrapper is the key. By using flex: 1 and minHeight: 0, 
-          it consumes all available space without adding padding. 
-      */}
-      <div style={{ 
-        flex: 1, 
-        width: "100%", 
-        minHeight: 0, 
+  useEffect(() => {
+    if (
+      useDefaultSvgColors &&
+      (nodeColor !== defaultNodeColor ||
+        strokeColor !== defaultStrokeColor ||
+        data.gradientStart ||
+        data.gradientEnd)
+    ) {
+      setUseDefaultSvgColors(false);
+    }
+  }, [
+    nodeColor,
+    strokeColor,
+    defaultNodeColor,
+    defaultStrokeColor,
+    data.gradientStart,
+    data.gradientEnd,
+    useDefaultSvgColors,
+  ]);
+
+  const shouldApplyBlink = shouldBlink && !isDeveloperMode;
+
+  /* ---------------------------- Render ---------------------------- */
+
+  const content = (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
         display: "flex",
-        flexDirection: "column"
-      }}>
-        <SvgContent
-          svgContent={svgContent}
-          svgPath={svgPath}
-          isHighlighted={isHighlighted}
-          svgContainerRef={svgContainerRef}
-          HandlesComponent={HandlesComponent}
-          id={id}
-          shouldApplyBlink={shouldBlink && !isDeveloperMode}
-        />
-      </div>
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: failureModeList ? "pointer" : "default",
+      }}
+    >
+      <SvgContent
+        svgContent={svgContent}
+        svgPath={svgPath}
+        isHighlighted={isHighlighted}
+        svgContainerRef={svgContainerRef}
+        HandlesComponent={HandlesComponent}
+        id={id}
+        shouldApplyBlink={shouldApplyBlink}
+      />
 
-      {subTag && (
-        <div style={{ flexShrink: 0, fontSize: "12px", color: "#666", textAlign: "center", width: "100%" }}>
-          {subTag}
-        </div>
+      {isDeveloperMode && (
+        <Tooltip
+          id={`tooltip-${id}`}
+          style={{
+            zIndex: 9999,
+            maxWidth: "250px",
+            whiteSpace: "pre-line",
+          }}
+          disableResizeObserver
+          disableAutoUpdate
+        >
+          {showTooltipContent(tooltipContent)}
+        </Tooltip>
       )}
     </div>
   );
+
+  if (!isDeveloperMode) {
+    return (
+      <NodeTooltip nodeId={id}>
+        <NodeTooltipContent id={id}>
+          {failureModeList?.length ? (
+            <div className="p-[.7vmin] flex flex-col uppercase">
+              <div className="border-b-[.1vmin] border-b-primary_gray_2 text-center">
+                <span className="text-12 font-sabic_text_bold">
+                  {tooltipContent || "-"}
+                </span>
+              </div>
+
+              <div className="flex flex-col uppercase">
+                {ttfDays && (
+                  <div className="flex text-13 pt-1 gap-1 items-start">
+                    <div className="text-12 font-sabic_text_bold">
+                      Estimated TTF :
+                    </div>
+                    <div>
+                      {ttfDays} {ttfDays > 1 ? "Days" : "Day"}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex text-13 pt-[1vmin] gap-[1vmin] items-start">
+                  <div className="text-12 font-sabic_text_bold">
+                    Failure Mode
+                    {failureModeList.length > 1 ? "s" : ""} :
+                  </div>
+
+                  <ul className="flex flex-col">
+                    {failureModeList.map((item, index) => (
+                      <li key={`${item}-flow`}>
+                        {index + 1}. {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : (
+            showTooltipContent(tooltipContent)
+          )}
+        </NodeTooltipContent>
+
+        {content}
+      </NodeTooltip>
+    );
+  }
+
+  return content;
 };
 
 export default SvgNode;
